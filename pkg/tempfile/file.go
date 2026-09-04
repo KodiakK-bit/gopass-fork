@@ -15,11 +15,22 @@ var ErrNotInit = fmt.Errorf("not initialized")
 // globalPrefix is prefixed to all temporary dirs.
 var globalPrefix string
 
+// mountHandle is implemented by platform-specific mount handles that need
+// to be released when the tempfile is removed. Currently only used on
+// Windows (see mount_windows.go), where it is satisfied by
+// *winfsp.FileSystem. It is declared here, without any platform build tag,
+// so that File itself stays platform-independent and pkg/tempfile does not
+// need a Windows-only variant of the File type.
+type mountHandle interface {
+	Unmount()
+}
+
 // File is a temporary file that is stored on a ramdisk if possible.
 type File struct {
 	dir string
 	dev string
 	fh  *os.File
+	mnt mountHandle // only ever set on Windows; nil on all other platforms.
 }
 
 // New returns a new tempfile wrapper.
