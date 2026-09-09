@@ -100,6 +100,23 @@ func isValidWinFspMode(v string) bool {
 	}
 }
 
+// stripQuotes removes one matching pair of surrounding double or single
+// quotes from v (e.g. `"require"` becomes `require`). Needed because
+// cmd.exe's `set NAME=value` does not strip quotes the way POSIX shells
+// do, so a quoted mode value reaches us with the quotes still attached.
+func stripQuotes(v string) string {
+	if len(v) < 2 {
+		return v
+	}
+
+	first, last := v[0], v[len(v)-1]
+	if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+		return v[1 : len(v)-1]
+	}
+
+	return v
+}
+
 // winFspModeFromFile is a self-contained, feature-flag-scoped discovery
 // helper for a dotfile-style override, for users who prefer to keep this
 // setting in a file rather than an environment variable (e.g. dotfile
@@ -131,7 +148,7 @@ func winFspModeFromFile() string {
 		return ""
 	}
 
-	return strings.ToLower(strings.TrimSpace(string(data)))
+	return strings.ToLower(strings.TrimSpace(stripQuotes(strings.TrimSpace(string(data)))))
 }
 
 // winFspMode resolves the effective mode for this run, in order of
@@ -140,7 +157,7 @@ func winFspModeFromFile() string {
 // unrecognized value from either source is logged and skipped, falling
 // through to the next source, exactly as if it had been unset.
 func winFspMode() string {
-	if v := strings.ToLower(strings.TrimSpace(os.Getenv("GOPASS_WINFSP_MODE"))); v != "" {
+	if v := strings.ToLower(strings.TrimSpace(stripQuotes(strings.TrimSpace(os.Getenv("GOPASS_WINFSP_MODE"))))); v != "" {
 		if isValidWinFspMode(v) {
 			return v
 		}
