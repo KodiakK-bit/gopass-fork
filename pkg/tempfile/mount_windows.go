@@ -183,6 +183,41 @@ func (t *File) mount(ctx context.Context) error {
 
 	fs := gofs.New(memfs.New(memfs.WithCaseInsensitive(true)))
 
+	// Unlike mount_darwin.go's "diskutil mount -mountpoint t.dir" (which
+	// follows the POSIX convention of mounting onto an already-existing,
+	// empty directory, same as Linux), WinFsp's directory-mountpoint mode
+	// does the opposite: it creates the mountpoint itself as an NTFS
+	// reparse point ("mountpoint junction") at t.dir, and NTFS refuses to
+	// create that reparse point if a filesystem object already occupies
+	// the path. See https://winfsp.dev/doc/Frequently-Asked-Questions/
+	// ("Inability to mount over a non-empty directory on Windows ... NTFS
+	// disallows the creation of (mountpoint) reparse points on non-empty
+	// directories"); rclone hit the identical "Cannot create a file when
+	// that file already exists" failure for the same reason when its
+	// destination path was pre-created.
+	//
+	// t.dir was already created (empty) by os.MkdirTemp in tempfile.New
+	// (pkg/tempfile/file.go) before mount() is ever invoked, so we must
+	// remove that placeholder directory here and let winfsp.Mount recreate
+	// the path as its reparse point. This opens a small, unavoidable
+	// TOCTOU window between os.Remove and winfsp.Mount; given the random
+	// suffix os.MkdirTemp already put in the path, the practical collision
+	// risk on a single-user workstation is negligible, and is the same
+	// class of risk WinFsp's own directory-mount design already accepts
+	// (it cannot guarantee mountpoint cleanup on a crash either, which is
+	// why it relies on FILE_FLAG_DELETE_ON_CLOSE instead of a persistent
+	// on-disk directory).
+	if err := os.Remove(t.dir); err != nil && !os.IsNotExist(err) {
+		if mode == "require" {
+			return fmt.Errorf("%s=require but failed to prepare mountpoint %s: %w", winFspModeEnvVar, t.dir, err)
+		}
+
+		out.Warningf(ctx, "failed to prepare winfsp mountpoint %s, falling back to the default temp directory: %s", t.dir, err)
+		out.Printf(ctx, winFspHint)
+
+		return nil
+	}
+
 	fspFS, err := winfsp.Mount(fs, t.dir)
 	if err != nil {
 		if mode == "require" {
